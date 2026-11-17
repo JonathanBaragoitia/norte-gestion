@@ -47,8 +47,6 @@ export async function mountBusiness(data, { api, esc, toast, onProposal, reload,
                 esc(run.context.from) +
                 ' — ' +
                 esc(run.context.to) +
-                ' · Contexto ' +
-                esc(run.contextHash) +
                 (run.contextHash === result.contextHash
                   ? ' · Coincide con los datos al abrir esta vista'
                   : ' · Instantánea histórica') +

@@ -9,7 +9,7 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { Store, sha } from '../src/infrastructure/store.ts';
 import { ProposalService, actorFor } from '../src/application/proposals.ts';
-import { AppError, simulate, validatePlan } from '../src/domain/catalog.ts';
+import { AppError, compareThreeForTwo, simulate, validatePlan } from '../src/domain/catalog.ts';
 import { makeServer } from '../src/server.ts';
 function required<T>(value: T | undefined): T {
   assert.notEqual(value, undefined);
@@ -37,6 +37,51 @@ const setup = (t: TestContext) => {
 };
 const code = (expected: string) => (error: unknown) =>
   error instanceof AppError && error.code === expected;
+test('una propuesta por producto solo cambia el artículo seleccionado', (t) => {
+  const { store, app } = setup(t);
+  const before = store.products();
+  const chosen = required(before.find((p) => p.category === 'Lavado exterior'));
+  const proposal = app.create(editor, {
+    ...request(),
+    plan: { ...request().plan, productId: chosen.id },
+  });
+  assert.deepEqual(
+    proposal.changes.map((change) => change.productId),
+    [chosen.id],
+  );
+  assert.throws(
+    () => simulate(before, { category: 'Cristales', basisPoints: 500, productId: chosen.id }),
+    code('EMPTY_SCOPE'),
+  );
+  app.publish(reviewer, proposal.id, proposal.digest);
+  assert.deepEqual(
+    store.products().filter((p) => p.id !== chosen.id),
+    before.filter((p) => p.id !== chosen.id),
+  );
+});
+
+test('el 3×2 cobra dos unidades y calcula el coste de las tres', () => {
+  const products = [
+    {
+      id: 'one',
+      sku: 'ONE',
+      name: 'Champú',
+      category: 'Lavado',
+      priceCents: 1000,
+      costCents: 600,
+      version: 1,
+    },
+  ];
+  assert.deepEqual(compareThreeForTwo(products, 'one'), {
+    regularRevenue: 3000,
+    revenue: 2000,
+    cost: 1800,
+    gross: 200,
+    margin: 10,
+    meetsMinimum: false,
+  });
+  assert.throws(() => compareThreeForTwo(products, 'other'), code('INVALID_PRODUCT'));
+});
 test('simular no modifica catálogo ni pedidos', (t) => {
   const { store, app } = setup(t),
     products = store.products(),

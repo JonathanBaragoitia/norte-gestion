@@ -51,6 +51,7 @@ export function describeAudit(
     return {
       available: false,
       proposalId: null,
+      operationId: null,
       plan: null,
       instruction: null,
       createdBy: null,
@@ -225,14 +226,8 @@ export function describeAudit(
       '. Operación ' +
       (text(detail.orderId) ?? text(detail.requestId) ?? '') +
       '. Sin reembolso automático.';
+  const isPurchase = typeof event.action === 'string' && event.action.startsWith('purchase.');
   const operations: Record<string, string> = {
-    'purchase.created': 'Compra preparada para revisión',
-    'purchase.approved': 'Compra aprobada',
-    'purchase.sent': 'Envío al proveedor registrado',
-    'purchase.partially_received': 'Entrega de proveedor recibida con unidades pendientes',
-    'purchase.receipt-reopened': 'Unidades pendientes tras anular la recepción',
-    'purchase.received': 'Compra recibida en almacén',
-    'purchase.cancelled': 'Compra pendiente cancelada',
     'incident.created': 'Incidencia abierta',
     'incident.updated': 'Seguimiento de incidencia actualizado',
     'transport.damage-created': 'Rotura de transporte registrada',
@@ -241,15 +236,24 @@ export function describeAudit(
     'document.processed': 'Documento revisado incorporado',
     'order.partial-returned': 'Mercancía devuelta por unidades',
   };
-  if (typeof event.action === 'string' && operations[event.action])
-    detail.instruction =
-      operations[event.action] +
-      ' · ' +
-      (text(detail.id) ?? text(detail.orderId) ?? '') +
-      (detail.quantity ? ' · ' + detail.quantity + ' unidades' : '') +
-      (text(detail.reason) ? ' · ' + text(detail.reason) : '') +
-      (text(detail.reference) ? ' · Referencia ' + text(detail.reference) : '') +
-      '. Sin pagos ni comunicaciones externas automáticas.';
+  const isOperation = typeof event.action === 'string' && Object.hasOwn(operations, event.action);
+  if (isPurchase || isOperation) {
+    const review = record(detail.review);
+    const reason =
+      event.action === 'purchase.rejected' || event.action === 'purchase.changes_requested'
+        ? (text(review?.reason) ?? text(detail.reason))
+        : text(detail.reason);
+    const supplier = text(detail.supplierName);
+    const reference = text(detail.reference);
+    detail.instruction = [
+      supplier && 'Proveedor: ' + supplier,
+      reason,
+      typeof detail.quantity === 'number' && detail.quantity > 0 && detail.quantity + ' unidades',
+      reference && 'Referencia: ' + reference,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
   const id = text(detail.id);
   const proposal = proposals.find(
     (value) =>
@@ -272,6 +276,7 @@ export function describeAudit(
   return {
     available: true,
     proposalId: id,
+    operationId: isPurchase || isOperation ? (id ?? text(detail.orderId)) : null,
     plan: plan(detail.plan) ?? proposal?.plan ?? null,
     instruction: text(detail.instruction) ?? proposal?.instruction ?? null,
     createdBy: text(detail.createdBy) ?? proposal?.createdBy ?? null,

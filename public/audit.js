@@ -1,3 +1,21 @@
+export function proposalInstructionSummary(instruction) {
+  // The stored instruction remains intact because it is part of the proposal's audit trail.
+  const signal =
+    /^Revisión comercial desde señal c\d+-(no-sales|margin) \(\d{4}-\d{2}-\d{2} — \d{4}-\d{2}-\d{2}\)\. (.*?) Datos: stock \d+, unidades vendidas registradas \d+\. Contexto [a-f0-9]{64}\. Motivo del editor: ([\s\S]+)$/.exec(
+      instruction,
+    );
+  if (!signal) return instruction;
+  const [, type, message, reason] = signal;
+  const summary =
+    type === 'no-sales'
+      ? 'Hay existencias, pero no se registraron ventas en el periodo analizado. Revisa la visibilidad de los productos y simula una promoción si el margen lo permite.'
+      : message.replace(
+          'Revisar antes de aplicar descuentos.',
+          'Comprueba los costes y simula un ajuste de precio antes de ofrecer descuentos.',
+        );
+  return summary + ' Motivo: ' + reason;
+}
+
 export function auditPage(events, { from = '', to = '', query = '', page = 1, size = 25 } = {}) {
   const needle = query.trim().toLocaleLowerCase('es-ES');
   const filtered = events
@@ -99,15 +117,15 @@ export function auditRows(data, { esc, money, date }) {
       const rows = detail?.changes ?? [];
       return `<article class="audit-entry">
       <div class="audit-entry-heading"><span class="audit-symbol">${published ? '↗' : '◷'}</span><div><h3>${esc(actions[event.action] ?? event.action)}</h3>
-      ${detail?.plan ? `<p class="audit-change">${esc(detail.plan.category)} · ${esc(percentage(detail.plan))} · ${rows.length} productos</p>` : ''}</div><time>${esc(date(event.at))}</time></div>
+      ${detail?.plan ? `<p class="audit-change">${esc(detail.plan.productId ? (rows[0]?.name ?? detail.plan.category) : detail.plan.category)} · ${esc(percentage(detail.plan))} · ${rows.length} productos</p>` : ''}</div><time>${esc(date(event.at))}</time></div>
       <p><strong>${published ? 'Publicado por' : 'Realizado por'}:</strong> ${esc(detail?.actorName ?? name(event.actor))}${published && detail?.createdBy ? ' · <strong>Propuesto por:</strong> ' + esc(name(detail.createdBy)) : ''}</p>
-      ${detail?.instruction ? '<p><strong>Motivo:</strong> ' + esc(detail.instruction) + '</p>' : ''}
+      ${detail?.instruction ? '<p><strong>Motivo:</strong> ' + esc(proposalInstructionSummary(detail.instruction)) + '</p>' : ''}
       ${proposalEvent ? '<p class="audit-outcome">' + (published ? 'Se aplicaron los siguientes cambios de precio al catálogo.' : 'Solo se simuló el cambio; este evento no modificó los precios del catálogo.') + '</p>' : ''}
       ${rows.length ? `<details ${published ? 'open' : ''}><summary>Ver ${rows.length} cambios · antes y después</summary><div class="table-wrap"><table><thead><tr><th>Producto</th><th class="number">Antes</th><th class="number">Después</th><th class="number">Diferencia</th></tr></thead><tbody>${rows.map((row) => '<tr><td>' + esc(row.name) + '</td><td class="number">' + money(row.beforeCents) + '</td><td class="number">' + money(row.afterCents) + '</td><td class="number">' + (row.afterCents > row.beforeCents ? '+' : '') + money(row.afterCents - row.beforeCents) + '</td></tr>').join('')}</tbody></table></div></details>` : ''}
       ${detail?.findings?.length ? '<ul class="audit-findings">' + detail.findings.map((message) => '<li>' + esc(message) + '</li>').join('') + '</ul>' : ''}
       ${proposalEvent && !rows.length ? '<p class="hint">Este evento no contiene un detalle de precios recuperable.</p>' : ''}
       ${detail && !detail.available ? '<p class="hint">No se pudo interpretar el detalle guardado de este evento.</p>' : ''}
-      <details><summary>Detalle técnico del registro</summary><p class="subtle">Registro ${esc(event.seq)} · Hash ${esc(event.hash)}</p></details>
+      <details><summary>Detalle técnico del registro</summary><p class="subtle">Registro ${esc(event.seq)} · Hash ${esc(event.hash)}</p>${detail?.operationId ? '<p class="subtle">Identificador de operación: ' + esc(detail.operationId) + '</p>' : ''}</details>
     </article>`;
     })
     .join('');

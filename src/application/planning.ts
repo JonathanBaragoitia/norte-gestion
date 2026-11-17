@@ -32,6 +32,7 @@ export function validateDecision(value: unknown): PlanDecision {
       let plan: Plan;
       try {
         plan = validatePlan(record.plan);
+        if (plan.productId !== undefined) return invalid();
       } catch {
         return invalid();
       }

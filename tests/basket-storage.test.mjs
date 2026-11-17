@@ -1,6 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { basketPriceChanges, readBasket, saveBasket } from '../public/basket-storage.js';
+import {
+  basketPriceChanges,
+  basketStockChanges,
+  readBasket,
+  saveBasket,
+} from '../public/basket-storage.js';
+
+test('carrito detecta productos agotados, retirados y con menos unidades de las seleccionadas', () => {
+  const lines = [
+    { productId: 'one', quantity: 2 },
+    { productId: 'two', quantity: 1 },
+    { productId: 'three', quantity: 1 },
+    { productId: 'four', quantity: 1 },
+  ];
+  const products = [
+    { id: 'one', quantity: 1 },
+    { id: 'two', quantity: 0 },
+    { id: 'four', quantity: 1 },
+  ];
+  assert.deepEqual(
+    [...basketStockChanges(lines, products)],
+    [
+      ['one', 1],
+      ['two', 0],
+      ['three', 0],
+    ],
+  );
+});
 const memory = () => {
   const values = new Map();
   return {

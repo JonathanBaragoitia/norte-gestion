@@ -16,7 +16,7 @@ import { mountCatalogManagement } from '/catalog-management.js';
 import { mountCash } from '/cash.js';
 import { mountEconomics } from '/economics.js';
 import { mountOrders } from '/shop.js';
-import { auditRows, auditPage } from '/audit.js';
+import { auditRows, auditPage, proposalInstructionSummary } from '/audit.js';
 import { mountImpact, clearImpactState } from '/review.js';
 const $ = (s) => document.querySelector(s);
 const esc = (v) =>
@@ -292,6 +292,10 @@ function render() {
     '<div class="field-row"><label class="field">Categoría<select id="category">' +
     data.categories.map((c) => '<option>' + esc(c) + '</option>').join('') +
     '</select></label><label class="field">Variación (%)<input id="percentage" type="number" min="-50" max="50" step="0.01" value="5" required></label></div>' +
+    '<label class="field">Producto<select id="proposal-product"><option value="">Toda la categoría</option></select></label>' +
+    '<details class="commercial-disclosure"><summary>Comparar ofertas para un producto</summary><div class="disclosure-body"><p>Selecciona un producto arriba. Puedes elegir otro para probar un pack.</p><label class="field">Producto para el pack (opcional)<select id="offer-companion"></select></label><button class="chip" id="preview-offers" type="button" ' +
+    (data.actor.role !== 'editor' ? 'disabled' : '') +
+    '>Comparar opciones</button><div id="offer-result" aria-live="polite"></div></div></details>' +
     '<p class="hint">Puedes completar estos campos manualmente o trasladar aquí un plan interpretado. Comprueba siempre categoría y porcentaje.</p>' +
     '<div class="chips"><button class="chip" type="button" data-example="safe">↗ Subida del 5 %</button><button class="chip" type="button" data-example="blocked">⊘ Probar rebaja del 25 %</button></div>' +
     '<button class="primary" type="submit" ' +
@@ -315,7 +319,7 @@ function render() {
               '" data-proposal="' +
               esc(p.id) +
               '"><span><strong>' +
-              esc(p.plan.category) +
+              esc(p.plan.productId ? (p.changes[0]?.name ?? p.plan.category) : p.plan.category) +
               ' · ' +
               (p.plan.basisPoints > 0 ? '+' : '') +
               (p.plan.basisPoints / 100).toLocaleString('es-ES') +
@@ -348,6 +352,13 @@ function render() {
   });
   applyProposalFilter();
   $('#proposal-form').addEventListener('submit', submit);
+  $('#category').addEventListener('change', updateProposalProducts);
+  updateProposalProducts();
+  $('#proposal-product').addEventListener('change', updateOfferCompanions);
+  $('#offer-companion').addEventListener('change', () => {
+    $('#offer-result').textContent = '';
+  });
+  $('#preview-offers').addEventListener('click', previewOffers);
   $('#ai-instruction').addEventListener('input', (e) => {
     aiInstruction = e.target.value;
     aiResult = null;
@@ -359,6 +370,7 @@ function render() {
     b.addEventListener('click', () => {
       const safe = b.dataset.example === 'safe';
       $('#category').value = 'Lavado exterior';
+      updateProposalProducts();
       $('#percentage').value = safe ? '5' : '-25';
       $('#instruction').value = safe
         ? 'Actualizar las tarifas de Lavado exterior en un 5 % conservando los pedidos confirmados.'
@@ -403,6 +415,7 @@ function renderAI() {
   $('#use-plan').addEventListener('click', () => {
     $('#instruction').value = aiInstruction;
     $('#category').value = aiResult.plan.category;
+    updateProposalProducts();
     $('#percentage').value = aiResult.plan.basisPoints / 100;
     toast('Plan trasladado. Revisa los campos y pulsa Simular propuesta.');
   });
@@ -473,7 +486,7 @@ function renderDetail() {
           ? '3 · Requiere nueva simulación'
           : '3 · Pendiente de publicación') +
     '</li></ol><p class="instruction">' +
-    esc(p.instruction) +
+    esc(proposalInstructionSummary(p.instruction)) +
     '</p>' +
     '<div id="impact-review"><p class="hint">Cargando comparación e impacto…</p></div>' +
     '<div class="checks">' +
@@ -524,6 +537,85 @@ function renderDetail() {
     }
   });
 }
+function updateProposalProducts() {
+  $('#proposal-product').innerHTML =
+    '<option value="">Toda la categoría</option>' +
+    data.products
+      .filter((product) => product.category === $('#category').value)
+      .map(
+        (product) => '<option value="' + esc(product.id) + '">' + esc(product.name) + '</option>',
+      )
+      .join('');
+  updateOfferCompanions();
+}
+function updateOfferCompanions() {
+  const selected = $('#proposal-product').value;
+  $('#offer-companion').innerHTML =
+    '<option value="">Sin pack</option>' +
+    data.products
+      .filter((product) => product.id !== selected)
+      .map(
+        (product) => '<option value="' + esc(product.id) + '">' + esc(product.name) + '</option>',
+      )
+      .join('');
+  $('#offer-result').textContent = '';
+}
+async function previewOffers(event) {
+  const button = event.currentTarget;
+  const product = $('#proposal-product');
+  const companion = $('#offer-companion');
+  const result = $('#offer-result');
+  const productId = product.value;
+  const companionId = companion.value;
+  if (!productId) {
+    result.textContent = 'Selecciona un producto.';
+    product.focus();
+    return;
+  }
+  button.disabled = true;
+  result.textContent = 'Calculando opciones…';
+  const selectionMatches = () => product.value === productId && companion.value === companionId;
+  try {
+    const report = await api('/api/proposals/offer-comparison', {
+      productId,
+      ...(companionId ? { companionId } : {}),
+    });
+    if (!selectionMatches()) return;
+    result.innerHTML =
+      '<p>Stock disponible: ' +
+      esc(report.stock) +
+      ' unidades. Importes sin IVA por cada venta simulada.</p>' +
+      (report.companionAvailable === false ? '<p>El segundo producto está agotado.</p>' : '') +
+      '<div class="table-wrap"><table><thead><tr><th>Opción</th><th>Unidades</th><th>Precio</th><th>Margen bruto</th></tr></thead><tbody>' +
+      report.options
+        .map(
+          ({ title, detail, offer }) =>
+            '<tr><td><strong>' +
+            esc(title) +
+            '</strong><br>' +
+            esc(detail) +
+            '</td>' +
+            (offer
+              ? '<td>' +
+                esc(offer.units) +
+                '</td><td>' +
+                money(offer.revenue) +
+                '</td><td>' +
+                esc(offer.margin.toLocaleString('es-ES', { maximumFractionDigits: 1 })) +
+                ' %' +
+                (offer.meetsMinimum ? '' : '<br>Por debajo del 20 %') +
+                '</td>'
+              : '<td>—</td><td>Sin cambio</td><td>Sin cambio</td>') +
+            '</tr>',
+        )
+        .join('') +
+      '</tbody></table></div><p class="hint">Se incluyen las ofertas que permiten las existencias actuales. Esta comparación no publica cambios.</p>';
+  } catch (error) {
+    if (selectionMatches()) result.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
 async function submit(event) {
   event.preventDefault();
   if (busy) return;
@@ -534,7 +626,11 @@ async function submit(event) {
   }
   const body = {
     instruction: $('#instruction').value,
-    plan: { category: $('#category').value, basisPoints: Math.round(percentage * 100) },
+    plan: {
+      category: $('#category').value,
+      basisPoints: Math.round(percentage * 100),
+      ...($('#proposal-product').value ? { productId: $('#proposal-product').value } : {}),
+    },
   };
   busy = true;
   const button = $('#proposal-form button[type="submit"]');
@@ -617,7 +713,9 @@ function renderAudit() {
     heading(
       'TRAZABILIDAD',
       'Qué cambió y por qué.',
-      'Filtra por fecha o referencia. Los hechos se ordenan por fecha, del más reciente al más antiguo. Se consultan hasta 1.000 registros disponibles.',
+      'Filtra por fecha o referencia. Se muestran primero los hechos más recientes, con un máximo de ' +
+        (data.auditLimit ?? 1000).toLocaleString('es-ES') +
+        ' registros.',
     ) +
     '<section class="panel"><div class="panel-title"><h2>Registro de actividad</h2><span class="badge ' +
     (data.auditValid ? 'ready' : 'blocked') +
@@ -630,7 +728,7 @@ function renderAudit() {
     esc(auditFilter.to) +
     '"></label><label class="field">Referencia o texto<input name="query" maxlength="200" value="' +
     esc(auditFilter.query) +
-    '"></label><button>Filtrar</button></form><p id="audit-count" aria-live="polite"></p><div id="audit-rows"></div><div class="audit-pages"><button id="audit-prev" type="button">Anterior</button><button id="audit-next" type="button">Siguiente</button></div><p class="hint">La cadena ayuda a detectar alteraciones locales. Una persona con control de toda la base podría recalcularla; no es una firma externa.</p></div></section>';
+    '"></label><button class="primary" type="submit">Filtrar</button></form><p id="audit-count" aria-live="polite"></p><div id="audit-rows"></div><div class="audit-pages"><button id="audit-prev" type="button">Anterior</button><button id="audit-next" type="button">Siguiente</button></div><p class="hint">La cadena ayuda a detectar alteraciones locales. Una persona con control de toda la base podría recalcularla; no es una firma externa.</p></div></section>';
   const draw = () => {
     const result = auditPage(data.audit, auditFilter);
     auditFilter.page = result.page;

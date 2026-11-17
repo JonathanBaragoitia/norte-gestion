@@ -15,7 +15,7 @@ export type Change = {
   afterCents: number;
   costCents?: number;
 };
-export type Plan = { category: string; basisPoints: number };
+export type Plan = { category: string; basisPoints: number; productId?: string };
 export type Finding = { code: string; productId: string; message: string };
 export type Proposal = {
   id: string;
@@ -46,7 +46,7 @@ export function validatePlan(input: unknown): Plan {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     return fail(400, 'INVALID_PLAN', 'El plan debe ser un objeto.');
   const v = input as Record<string, unknown>;
-  if (Object.keys(v).some((k) => !['category', 'basisPoints'].includes(k)))
+  if (Object.keys(v).some((k) => !['category', 'basisPoints', 'productId'].includes(k)))
     return fail(400, 'INVALID_PLAN', 'El plan contiene operaciones no permitidas.');
   if (typeof v.category !== 'string' || !v.category.trim() || v.category.length > 80)
     return fail(400, 'INVALID_CATEGORY', 'Selecciona una categoría.');
@@ -60,12 +60,30 @@ export function validatePlan(input: unknown): Plan {
       'INVALID_PERCENTAGE',
       'El porcentaje debe estar entre −50 % y 50 %, sin ser cero.',
     );
-  return { category: v.category, basisPoints: v.basisPoints as number };
+  if (
+    'productId' in v &&
+    (typeof v.productId !== 'string' || !v.productId.trim() || v.productId.length > 80)
+  )
+    return fail(400, 'INVALID_PRODUCT', 'Selecciona un producto válido.');
+  return {
+    category: v.category,
+    basisPoints: v.basisPoints as number,
+    ...(typeof v.productId === 'string' ? { productId: v.productId } : {}),
+  };
 }
 export function simulate(products: Product[], input: unknown) {
   const plan = validatePlan(input),
-    selected = products.filter((p) => p.category === plan.category);
-  if (!selected.length) return fail(400, 'EMPTY_SCOPE', 'La categoría no tiene productos.');
+    selected = products.filter(
+      (p) => p.category === plan.category && (!plan.productId || p.id === plan.productId),
+    );
+  if (!selected.length)
+    return fail(
+      400,
+      'EMPTY_SCOPE',
+      plan.productId
+        ? 'El producto no está disponible en esta categoría.'
+        : 'La categoría no tiene productos.',
+    );
   const changes: Change[] = selected.map((p) => ({
     productId: p.id,
     name: p.name,
@@ -77,6 +95,21 @@ export function simulate(products: Product[], input: unknown) {
   if (changes.every((c) => c.beforeCents === c.afterCents))
     return fail(400, 'NO_CHANGE', 'El redondeo no modifica ningún precio.');
   return { plan, changes, findings: checkChanges(products, changes) };
+}
+export function compareThreeForTwo(products: Product[], productId: unknown) {
+  const product = products.find((entry) => entry.id === productId);
+  if (!product) return fail(400, 'INVALID_PRODUCT', 'Selecciona un producto válido.');
+  const regularRevenue = product.priceCents * 3;
+  const revenue = product.priceCents * 2;
+  const cost = product.costCents * 3;
+  return {
+    regularRevenue,
+    revenue,
+    cost,
+    gross: revenue - cost,
+    margin: ((revenue - cost) / revenue) * 100,
+    meetsMinimum: revenue * 80 >= cost * 100,
+  };
 }
 export function checkChanges(products: Product[], changes: Change[]): Finding[] {
   const findings: Finding[] = [],

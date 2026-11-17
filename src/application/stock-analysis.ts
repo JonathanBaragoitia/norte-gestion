@@ -1,7 +1,7 @@
 import { remainingSale } from './partial-returns.ts';
 import type { Product } from '../domain/catalog.ts';
 import type { Sale } from './commerce.ts';
-import { fail } from '../domain/catalog.ts';
+import { compareThreeForTwo, fail } from '../domain/catalog.ts';
 import { businessDate, period } from './economics.ts';
 export type StockPolicy = {
   productId: string;
@@ -12,6 +12,76 @@ export type StockPolicy = {
   version: number;
 };
 export const DEFAULT_STOCK_POLICY = { leadDays: 7, safetyDays: 3, targetDays: 30, minimumUnits: 5 };
+export function salesOptions(
+  product: Product,
+  stock: number,
+  companion?: { product: Product; stock: number },
+) {
+  const options = [
+    {
+      id: 'visibility',
+      title: 'Mejorar la ficha y la visibilidad',
+      detail: 'Revisa fotos, descripción y ubicación en la tienda. Mantiene el precio actual.',
+      offer: null,
+    },
+  ];
+  const discountRevenue = Math.round((product.priceCents * 95) / 100);
+  const offers = [
+    { id: 'discount', title: 'Rebaja del 5 %', units: 1, revenue: discountRevenue },
+    {
+      id: 'second-half',
+      title: 'Segunda unidad a mitad de precio',
+      units: 2,
+      revenue: product.priceCents + Math.round(product.priceCents / 2),
+    },
+    {
+      id: 'three-for-two',
+      title: 'Oferta 3×2',
+      units: 3,
+      revenue: compareThreeForTwo([product], product.id).revenue,
+    },
+  ];
+  return [
+    ...options,
+    ...offers
+      .filter(({ units }) => stock >= units)
+      .map(({ id, title, units, revenue }) => {
+        const offer = offerTotals(units, revenue, product.costCents * units);
+        return {
+          id,
+          title,
+          detail: offer.meetsMinimum
+            ? 'Cumple el margen mínimo con los costes actuales.'
+            : 'Queda por debajo del margen mínimo del 20 %.',
+          offer,
+        };
+      }),
+    ...(stock > 0 && companion && companion.stock > 0
+      ? [
+          {
+            id: 'pack',
+            title: 'Pack con ' + companion.product.name,
+            detail: 'Una unidad de cada producto con un 5 % de descuento sobre el conjunto.',
+            offer: offerTotals(
+              2,
+              Math.round(((product.priceCents + companion.product.priceCents) * 95) / 100),
+              product.costCents + companion.product.costCents,
+            ),
+          },
+        ]
+      : []),
+  ];
+}
+function offerTotals(units: number, revenue: number, cost: number) {
+  const gross = revenue - cost;
+  return {
+    units,
+    revenue,
+    gross,
+    margin: (gross / revenue) * 100,
+    meetsMinimum: revenue * 80 >= cost * 100,
+  };
+}
 export function validateStockPolicy(input: Record<string, unknown>) {
   if (
     Object.keys(input).sort().join(',') !==
@@ -137,6 +207,10 @@ export function analyzeStock(
       policyIsDefault: policy.version === 0,
       signals,
       actions,
+      salesOptions:
+        stock > 0 && (!unitsSold || signals.some((signal) => signal.code === 'high-coverage'))
+          ? salesOptions(p, stock)
+          : [],
     };
   });
   return {

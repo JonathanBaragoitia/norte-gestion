@@ -1,6 +1,16 @@
 // Matches the maximum number of distinct lines accepted at checkout.
 export const BASKET_LINE_LIMIT = 50;
 
+export function basketStockChanges(lines, products) {
+  const stock = new Map(products.map(({ id, quantity }) => [id, quantity]));
+  const changes = new Map();
+  for (const { productId, quantity } of lines) {
+    const available = stock.get(productId);
+    if (available === undefined || available < quantity) changes.set(productId, available ?? 0);
+  }
+  return changes;
+}
+
 export function basketPriceChanges(lines, products) {
   const prices = new Map(products.map(({ id, priceCents }) => [id, priceCents]));
   const changes = new Map();

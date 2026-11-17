@@ -162,8 +162,8 @@ export class Store implements ChangeRepository {
   timestamp() {
     return this.clock();
   }
-  audit() {
-    return this.db.prepare('SELECT * FROM audit ORDER BY seq DESC LIMIT 1000').all();
+  audit(limit = 1000) {
+    return this.db.prepare('SELECT * FROM audit ORDER BY seq DESC LIMIT ?').all(limit);
   }
   verifyAudit() {
     let previous = 'GENESIS';

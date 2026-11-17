@@ -11,7 +11,7 @@ import { SupplierOfferStore } from './infrastructure/supplier-offer-store.ts';
 import { Approvals } from './application/approvals.ts';
 import { ApprovalStore } from './infrastructure/approval-store.ts';
 import { serverAddress } from './infrastructure/runtime-config.ts';
-import { analyzeStock, ConfigureStockPolicy } from './application/stock-analysis.ts';
+import { analyzeStock, ConfigureStockPolicy, salesOptions } from './application/stock-analysis.ts';
 import { StockPolicyStore } from './infrastructure/stock-policy-store.ts';
 import { compareCampaigns } from './application/campaigns.ts';
 import { ManageTariffs } from './application/tariffs.ts';
@@ -74,7 +74,11 @@ import { dailyWork, followUp } from './application/workbench.ts';
 import { DocumentImports, type DocumentImport } from './application/document-imports.ts';
 import { OperationStore } from './infrastructure/operation-store.ts';
 import { LocalCommercialAI } from './infrastructure/commercial-ai.ts';
-import { shoppingAdvice, type CommercialAI } from './application/shopping-assistance.ts';
+import {
+  dailyBrief,
+  shoppingAdvice,
+  type CommercialAI,
+} from './application/shopping-assistance.ts';
 import { documentText } from './infrastructure/document-text.ts';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const assets = new Map<string, readonly [string, string]>([
@@ -290,10 +294,28 @@ export function makeServer(
 
   const stockPolicies = new StockPolicyStore(store);
   const configureStockPolicy = new ConfigureStockPolicy(stockPolicies);
+  const scenarioFrom = process.env.CHANGELAB_SCENARIO_FROM;
+  const scenarioTo = process.env.CHANGELAB_SCENARIO_TO;
+  const scenarioPeriod =
+    process.env.CHANGELAB_SCENARIO &&
+    validDate(scenarioFrom) &&
+    validDate(scenarioTo) &&
+    scenarioFrom <= scenarioTo &&
+    Date.parse(scenarioTo) - Date.parse(scenarioFrom) < 366 * 86400000
+      ? { from: scenarioFrom, to: scenarioTo }
+      : null;
+  const analysisPeriod = () => {
+    const now = new Date();
+    return (
+      scenarioPeriod ?? {
+        from: businessDate(new Date(now.getTime() - 29 * 86400000).toISOString()),
+        to: businessDate(now.toISOString()),
+      }
+    );
+  };
   const stockSnapshot = () => {
-    const now = new Date(),
-      from = new Date(now.getTime() - 29 * 86400000),
-      snapshot = commerce.snapshot();
+    const { from, to } = analysisPeriod();
+    const snapshot = commerce.snapshot();
     return analyzeStock(
       store.products(),
       snapshot.inventory.map((r) => ({
@@ -301,14 +323,13 @@ export function makeServer(
         quantity: Number(r.quantity),
       })),
       snapshot.sales,
-      businessDate(from.toISOString()),
-      businessDate(now.toISOString()),
+      from,
+      to,
       stockPolicies.all(),
     );
   };
   const contextSnapshot = () => {
-    const now = new Date(),
-      from = new Date(now.getTime() - 29 * 86400000);
+    const { from, to } = analysisPeriod();
     const snapshot = commerce.snapshot();
     const context = businessContext(
       store.products(),
@@ -317,8 +338,8 @@ export function makeServer(
         quantity: Number(row.quantity),
       })),
       snapshot.sales,
-      businessDate(from.toISOString()),
-      businessDate(now.toISOString()),
+      from,
+      to,
     );
     const stock = stockSnapshot();
     const extra = stock.rows
@@ -998,6 +1019,38 @@ export function makeServer(
         json(200, stockSnapshot());
         return;
       }
+      if (req.method === 'POST' && url.pathname === '/api/stock-analysis/advice') {
+        const row = stockSnapshot().rows.find((entry) => entry.productId === body.productId);
+        if (!row?.salesOptions.length)
+          fail(
+            409,
+            'STOCK_SIGNAL_CHANGED',
+            'Actualiza el análisis. El artículo ya no tiene este aviso.',
+          );
+        const candidates = row.salesOptions
+          .filter(({ offer }) => !offer || offer.meetsMinimum)
+          .map(({ id, title, detail, offer }) => ({
+            id,
+            title,
+            detail: offer
+              ? detail +
+                ' Margen estimado: ' +
+                offer.margin.toFixed(1) +
+                ' %. Unidades por oferta: ' +
+                offer.units +
+                '.'
+              : detail +
+                ' Stock: ' +
+                row.stock +
+                '. Ventas registradas: ' +
+                row.unitsSold +
+                ' en ' +
+                row.observedDays +
+                ' días.',
+          }));
+        json(200, await dailyBrief(commercialAI, candidates));
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/business-context') {
         json(200, contextSnapshot());
         return;
@@ -1098,15 +1151,11 @@ export function makeServer(
       if (req.method === 'GET' && url.pathname === '/api/workspace') {
         const products = store.products();
         const proposals = store.proposals();
+        const auditLimit = scenarioPeriod ? 2000 : 1000;
         json(200, {
           actor,
           scenario: process.env.CHANGELAB_SCENARIO ?? null,
-          scenarioPeriod:
-            process.env.CHANGELAB_SCENARIO &&
-            validDate(process.env.CHANGELAB_SCENARIO_FROM) &&
-            validDate(process.env.CHANGELAB_SCENARIO_TO)
-              ? { from: process.env.CHANGELAB_SCENARIO_FROM, to: process.env.CHANGELAB_SCENARIO_TO }
-              : null,
+          scenarioPeriod,
           ...commerce.snapshot(),
           stockReviewCount: stockSnapshot().rows.filter((r) =>
             r.signals.some((s) => ['out-of-stock', 'reorder'].includes(s.code)),
@@ -1116,7 +1165,8 @@ export function makeServer(
           categories: [...new Set(products.map((p) => p.category))],
           orders: store.orders(),
           proposals,
-          audit: store.audit().map((event) => ({
+          auditLimit,
+          audit: store.audit(auditLimit).map((event) => ({
             ...event,
             summary: describeAudit({ action: event.action, detail: event.detail }, proposals, {
               hash: sha,
@@ -1530,6 +1580,29 @@ export function makeServer(
         } finally {
           planning = false;
         }
+        return;
+      }
+      if (url.pathname === '/api/proposals/offer-comparison') {
+        if (actor.role !== 'editor')
+          fail(403, 'FORBIDDEN', 'Solo una cuenta editora puede comparar ofertas.');
+        const products = store.products();
+        const product = products.find((entry) => entry.id === body.productId);
+        if (!product) fail(400, 'INVALID_PRODUCT', 'Selecciona un producto válido.');
+        const companion = products.find((entry) => entry.id === body.companionId);
+        if (body.companionId !== undefined && (!companion || companion.id === product.id))
+          fail(400, 'INVALID_PRODUCT', 'Selecciona otro producto para el pack.');
+        const inventory = commerce.snapshot().inventory;
+        const stock = (id: string) =>
+          Number(inventory.find((entry) => entry.productId === id)?.quantity ?? 0);
+        json(200, {
+          stock: stock(product.id),
+          companionAvailable: companion ? stock(companion.id) > 0 : null,
+          options: salesOptions(
+            product,
+            stock(product.id),
+            companion && { product: companion, stock: stock(companion.id) },
+          ),
+        });
         return;
       }
       if (url.pathname === '/api/proposals') {

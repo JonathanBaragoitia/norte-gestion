@@ -1,12 +1,16 @@
 export async function mountStockAnalysis(host, { api, esc, toast, editor, onChanged }) {
+  const money = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
   host.innerHTML = '<h2>Reposición y oportunidades por artículo</h2><p>Cargando existencias…</p>';
   try {
     const report = await api('/api/stock-analysis');
     if (!host.isConnected) return;
+    const unsold = report.rows.filter((row) => row.stock > 0 && row.unitsSold === 0).length;
     host.innerHTML =
       '<details class="commercial-disclosure stock-overview"><summary><span>Stock y reposición<small>' +
       report.rows.filter((r) => r.signals.length).length +
       ' artículos con avisos · ' +
+      unsold +
+      ' con stock y sin ventas registradas · ' +
       report.rows.length +
       ' en catálogo</small></span><span class="disclosure-action">Explorar artículos</span></summary><div class="disclosure-body"><details class="analysis-method"><summary>Periodo y criterios del análisis</summary><p>' +
       esc(report.from) +
@@ -80,6 +84,33 @@ export async function mountStockAnalysis(host, { api, esc, toast, editor, onChan
               '<ul>' +
               row.actions.map((a) => '<li>' + esc(a) + '</li>').join('') +
               '</ul>' +
+              (row.salesOptions.length
+                ? '<details class="commercial-disclosure"><summary>Ideas para vender este artículo</summary><div class="disclosure-body"><p>Compara opciones con el precio y el coste actuales. Importes sin IVA.</p><ul>' +
+                  row.salesOptions
+                    .map(
+                      ({ title, detail, offer }) =>
+                        '<li><strong>' +
+                        esc(title) +
+                        '</strong> · ' +
+                        esc(detail) +
+                        (offer
+                          ? ' Ingreso por ' +
+                            offer.units +
+                            (offer.units === 1 ? ' unidad: ' : ' unidades: ') +
+                            money.format(offer.revenue / 100) +
+                            ' · Margen: ' +
+                            esc(
+                              offer.margin.toLocaleString('es-ES', { maximumFractionDigits: 1 }),
+                            ) +
+                            ' %.'
+                          : '') +
+                        '</li>',
+                    )
+                    .join('') +
+                  '</ul><button type="button" class="chip" data-stock-advice="' +
+                  esc(row.productId) +
+                  '">Priorizar con IA</button><ul class="stock-advice-result" role="status"></ul></div></details>'
+                : '') +
               (row.alternatives.length
                 ? '<p>Otros artículos de la categoría con más ventas registradas: ' +
                   row.alternatives
@@ -103,6 +134,28 @@ export async function mountStockAnalysis(host, { api, esc, toast, editor, onChan
               '</details>',
           )
           .join('');
+      host.querySelectorAll('[data-stock-advice]').forEach((button) => {
+        button.onclick = async () => {
+          const result = button.nextElementSibling;
+          button.disabled = true;
+          result.innerHTML = '<li>Preparando prioridades…</li>';
+          try {
+            const advice = await api('/api/stock-analysis/advice', {
+              productId: button.dataset.stockAdvice,
+            });
+            result.innerHTML =
+              (advice.warning ? '<li>' + esc(advice.warning) + '</li>' : '') +
+              advice.text
+                .split('\n')
+                .map((line) => '<li>' + esc(line) + '</li>')
+                .join('');
+          } catch (error) {
+            result.innerHTML = '<li>' + esc(error.message) + '</li>';
+          } finally {
+            button.disabled = false;
+          }
+        };
+      });
       host.querySelectorAll('[data-stock-policy]').forEach(
         (form) =>
           (form.onsubmit = async (event) => {

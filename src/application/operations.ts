@@ -465,6 +465,7 @@ export class Purchases {
       this.repo.save(next, p.version);
       this.repo.record(actor.id, 'purchase.' + next.status, {
         id,
+        supplierName: p.supplierName,
         reference: next.reference,
         review: next.review,
       });

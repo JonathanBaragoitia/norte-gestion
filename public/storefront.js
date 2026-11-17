@@ -1,6 +1,12 @@
 if (location.hash === '#orders') location.replace('/mis-pedidos');
 if (location.hash === '#basket') location.replace('/carrito');
-import { BASKET_LINE_LIMIT, basketPriceChanges, readBasket, saveBasket } from '/basket-storage.js';
+import {
+  BASKET_LINE_LIMIT,
+  basketPriceChanges,
+  basketStockChanges,
+  readBasket,
+  saveBasket,
+} from '/basket-storage.js';
 import { searchProducts, mountCatalogAutocomplete } from '/catalog-search.js';
 import { showPaymentSummary } from '/payment-summary.js';
 import { deliveryEstimate } from '/order-tracking.js';
@@ -171,6 +177,8 @@ function renderCart() {
       'No se puede conservar el carrito al cambiar de página. Permite el almacenamiento del navegador para continuar.';
   const priceChanges =
     catalogState === 'ready' ? basketPriceChanges(cart.values(), products) : new Map();
+  const stockChanges =
+    catalogState === 'ready' ? basketStockChanges(cart.values(), products) : new Map();
   let total = 0,
     tax = 0;
   $('#cart').innerHTML =
@@ -189,6 +197,13 @@ function renderCart() {
           '</p>' +
           (priceChanges.has(line.productId)
             ? '<p>Nuevo precio unitario: ' + money(priceChanges.get(line.productId)) + '</p>'
+            : '') +
+          (stockChanges.has(line.productId)
+            ? '<p>' +
+              (stockChanges.get(line.productId)
+                ? 'Unidades disponibles: ' + stockChanges.get(line.productId)
+                : 'Artículo no disponible') +
+              '</p>'
             : '') +
           '<button class="chip" data-increase="' +
           esc(line.productId) +
@@ -214,8 +229,16 @@ function renderCart() {
       ? '<p role="status">Han cambiado precios. Revisa los nuevos importes antes de continuar.</p><button type="button" id="update-cart-prices" class="chip"' +
         (busy ? ' disabled' : '') +
         '>Actualizar precios del carrito</button>'
+      : '') +
+    (stockChanges.size
+      ? '<p role="status">Ajusta las cantidades de los artículos sin stock suficiente para continuar.</p>'
       : '');
-  $('#confirm').disabled = busy || !cart.size || catalogState !== 'ready' || priceChanges.size > 0;
+  $('#confirm').disabled =
+    busy ||
+    !cart.size ||
+    catalogState !== 'ready' ||
+    priceChanges.size > 0 ||
+    stockChanges.size > 0;
   $('#checkout').hidden = !cart.size;
   if (!cart.size)
     $('#cart').innerHTML =
@@ -324,7 +347,7 @@ $('#checkout').addEventListener('submit', (event) => {
           $('#message').textContent += ' No se pudo actualizar el catálogo; reintenta su carga.';
         }
       } catch (error) {
-        if (error.code === 'PRICE_CHANGED') {
+        if (['PRICE_CHANGED', 'INSUFFICIENT_STOCK', 'PRODUCT_UNAVAILABLE'].includes(error.code)) {
           try {
             await refresh();
           } catch {
