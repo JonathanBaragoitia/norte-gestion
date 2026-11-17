@@ -1,90 +1,87 @@
 # Norte Gestión
 
-Norte Gestión es la aplicación con la que Norte AutoCare gestiona sus pedidos, almacén y proveedores. Cuando llega una tarifa nueva, Oficina comprueba el documento y prepara una simulación. Dirección puede ver qué ocurre con el margen si conserva el precio de venta o si lo ajusta, y autoriza por separado los cambios comerciales.
+Norte Gestión es el panel interno de Norte AutoCare, una tienda de productos para el cuidado del automóvil. En el mismo proyecto están la tienda, donde el cliente compra y consulta sus pedidos, y el panel donde el equipo gestiona ventas, compras y almacén.
 
-## Arranque local
+El caso principal empieza cuando un proveedor envía una tarifa nueva. Oficina revisa el documento, Dirección comprueba cómo cambia el margen y decide si acepta el nuevo coste. Si también quiere cambiar el precio en tienda, lo tramita por separado. Así se puede seguir la decisión desde el PDF hasta el historial sin alterar los pedidos anteriores.
 
-Requisitos: **Node.js 24.12 o posterior de la rama 24** y npm. Node ejecuta los archivos TypeScript directamente. La comprobación de tipos se hace en un paso aparte. [Soporte de TypeScript en Node](https://nodejs.org/docs/latest-v24.x/api/typescript.html).
+## Arrancar en local
 
-Desde la carpeta de Norte Gestión:
+Necesitas **Node.js 24.12 o posterior de la rama 24** y npm. Desde la raíz del repositorio:
 
 ```sh
 npm ci
 npm start
 ```
 
-Abre [gestión](http://127.0.0.1:4317/gestion) o [tienda](http://127.0.0.1:4317/tienda). En Windows, `start-local.cmd` ejecuta el mismo arranque. Para desarrollo, `npm run dev` reinicia el servidor al editar el código. En VS Code, `ChangeLab.code-workspace` abre el proyecto con una tarea de comprobación.
+Deja la terminal abierta y entra en [Tienda](http://127.0.0.1:4317/tienda) o [Gestión](http://127.0.0.1:4317/gestion). En Windows puedes usar `start-local.cmd` después de instalar las dependencias. Si PowerShell bloquea `npm`, escribe `npm.cmd` en los comandos.
 
-La instalación local escucha por defecto en `127.0.0.1:4317` y guarda SQLite en `data/changelab.sqlite`. `PORT` y `CHANGELAB_DB` permiten elegir otros valores. Usa `.env.example` como guía de configuración.
+Al arrancar se crea la base SQLite en `data/changelab.sqlite` si aún no existe. Consulta [.env.example](.env.example) para configurar el puerto, Ollama o el correo. `CHANGELAB_DB` permite usar otro archivo SQLite.
 
-### Cuentas de gestión
+### Acceso de prueba
 
-`npm run users:create` (o `create-user.cmd` en Windows) crea cuentas con contraseña de al menos nueve caracteres. Elige `owner` para Dirección, `office` para Oficina y `warehouse` para Almacén. Los roles técnicos anteriores se conservan por compatibilidad. [Cuentas locales](docs/cuentas-locales.md) · [Roles de empresa](docs/roles-empresa.md).
-
-Para comprobar el acceso desde una instalación local nueva, ejecuta `npm run users:create` y crea estas dos cuentas. Introduce cada contraseña dos veces cuando la utilidad la pida. Son valores de ejemplo que solo funcionan si los configuras en tu base local.
+En otra terminal, ejecuta `npm run users:create` una vez por cada cuenta. La utilidad pide usuario, nombre, rol y contraseña. Introduce la contraseña dos veces. Los valores de esta tabla son para una base local de prueba y se habilitan al crear las cuentas.
 
 | Usuario          | Nombre              | Rol      | Contraseña de prueba   |
 | ---------------- | ------------------- | -------- | ---------------------- |
 | prueba-oficina   | Oficina de prueba   | `office` | `Oficina-Local-2026`   |
 | prueba-direccion | Dirección de prueba | `owner`  | `Direccion-Local-2026` |
 
-### Ollama
+Oficina prepara tarifas, compras y expediciones. Dirección revisa y autoriza cambios comerciales. Puedes crear otra cuenta con rol `warehouse` para comprobar recepciones, preparación y recogidas. [Cuentas locales](docs/cuentas-locales.md) · [Roles de empresa](docs/roles-empresa.md).
 
-Instala y arranca Ollama en el equipo y descarga el modelo:
+## Probar el recorrido de una tarifa
+
+1. Entra en Gestión como **Oficina**. Abre **Tarifas de proveedores → Importar y revisar tarifas**, selecciona **Bruma · Químicos de lavado** y adjunta el [PDF de ejemplo](tests/fixtures/tariff-bruma.pdf). Completa la referencia y el motivo.
+2. Abre **Propuestas para Dirección** y prepara la simulación. Busca la referencia `NA-001`. Con la base nueva, el coste pasa de 49,00 € a 52,50 €. Si se mantiene el precio neto de 79,90 €, el margen bruto por unidad baja del 38,67 % al 34,29 %.
+3. Entra como **Dirección**, coteja el original y aplica los costes revisados. La oferta del proveedor se actualiza. La simulación anterior queda desactualizada y se puede recalcular. El precio de venta se cambia desde **Propuestas**, con su propia autorización.
+
+## Qué puedes probar
+
+- **Tienda y pedidos.** Consulta el catálogo, añade productos al carrito y sigue las compras en **Mis pedidos**. Si cambia un precio o faltan unidades, el carrito muestra el aviso antes de continuar.
+- **Compras y almacén.** Oficina prepara una compra, Dirección la revisa y Almacén registra lo que llega. Se pueden registrar recepciones parciales, roturas y devoluciones.
+- **Envíos.** Almacén confirma la preparación, Oficina registra transportista y referencia, y Almacén confirma la recogida.
+- **Análisis comercial y propuestas.** Localiza artículos con existencias y sin ventas registradas. Puedes simular un ajuste para un producto o una categoría, o comparar una rebaja, un 3×2, una segunda unidad a mitad de precio y un pack según el stock. La comparación calcula el margen. Las ofertas por cantidad y los packs son escenarios de simulación.
+- **Facturación, caja e historial.** Consulta los documentos de prueba, los cobros simulados y los reembolsos registrados. El historial muestra quién hizo cada cambio y cuándo.
+
+## IA local
+
+Con Ollama iniciado, descarga el modelo que usa la aplicación por defecto:
 
 ```sh
 ollama pull qwen3:4b-instruct
 ```
 
-La aplicación consulta `http://127.0.0.1:11434` por defecto. `CHANGELAB_MODEL` selecciona el modelo local. Con Ollama inaccesible, la tienda conserva el catálogo y el buscador, y la propuesta de tarifa conserva el resumen por reglas. [Configuración de Ollama](docs/ollama-local.md).
+La aplicación consulta Ollama en `http://127.0.0.1:11434`. Puedes elegir otro modelo con `CHANGELAB_MODEL`. El modelo ayuda a interpretar peticiones de precio, ordenar opciones comerciales y destacar resultados de una simulación. Los importes se calculan en el servidor y la publicación exige los permisos correspondientes. Si Ollama falla, puedes seguir usando el catálogo, simular cambios manualmente y consultar el resumen de tarifa calculado por reglas. [Configuración de Ollama](docs/ollama-local.md).
 
-## Recorrido de una tarifa
+## Código y pruebas
 
-1. **Oficina** carga un PDF con texto, un CSV o el contenido de un correo. Si hay un importe ambiguo, puede escribir el coste unitario cotejado y conservar el original.
-2. En **Tarifas de proveedores → Importar y revisar tarifas → Propuestas para Dirección** guarda una simulación con los dos escenarios por artículo. El código calcula los importes y Ollama selecciona qué resultado destacar entre opciones comprobadas.
-3. **Dirección** consulta el documento, los márgenes y las versiones. Aprobar una tarifa actualiza la oferta del proveedor. Publicar un precio de venta es otra operación y exige su propia revisión. Si cambian los datos usados en la simulación, la propuesta queda marcada como desactualizada.
+| Directorio                    | Contenido                                              |
+| ----------------------------- | ------------------------------------------------------ |
+| `public/`                     | Interfaz de tienda y gestión en HTML, CSS y JavaScript |
+| `src/domain/`                 | Reglas de catálogo, precios y márgenes                 |
+| `src/application/`            | Casos de uso, como compras, tarifas y pedidos          |
+| `src/infrastructure/`         | Persistencia en SQLite y conexión con Ollama           |
+| `src/http/` y `src/server.ts` | Rutas HTTP, sesiones y arranque                        |
+| `tests/`                      | Pruebas de reglas, persistencia y API                  |
 
-En la tienda, el asistente trabaja con el catálogo disponible y comprueba el presupuesto con IVA. Para tapicerías, solicita el material si falta y exige compatibilidad expresa en la ficha.
-
-## Operaciones
-
-| Área               | Qué permite                                                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| Tienda             | Consultar fichas, usar el carrito y seguir pedidos propios como invitado o con cuenta.                                      |
-| Almacén y envíos   | Preparar pedidos, registrar recogidas, recibir compras y reabrir cantidades al anular una recepción vinculada.              |
-| Devoluciones       | Reponer unidades aptas y registrar por separado la cuarentena y la baja física de las dañadas.                              |
-| Proveedores        | Tramitar compras y documentar abonos o reposiciones de reclamaciones. La reposición se vincula a una entrada ya registrada. |
-| Facturación y caja | Gestionar borradores, documentos DEMO, anotaciones de cobro, reembolsos y conciliación.                                     |
-| Control comercial  | Simular propuestas de precio y campañas, revisar existencias y consultar el historial.                                      |
-
-## Arquitectura y comprobaciones
-
-`src/domain` contiene reglas de catálogo. `src/application` coordina los casos de uso. `src/infrastructure` conecta SQLite y Ollama, y `src/server.ts` compone la aplicación y sus rutas. `public` contiene la interfaz y `tests` las pruebas. [Arquitectura](docs/arquitectura-actual.md).
-
-La simulación conserva los precios de los pedidos anteriores. La publicación comprueba margen, versión y huella. La autenticación usa scrypt y cookies HttpOnly y SameSite, con comprobaciones de origen y CSRF para operaciones que cambian datos. El correo usa una cola transaccional en SQLite. El modo de vista previa queda asociado al mensaje al crearlo. [Correos y envíos](docs/correos-envios.md).
+El servidor usa Node.js y TypeScript. Tienda y Gestión se sirven desde un mismo proceso y comparten la base de datos. [Arquitectura](docs/arquitectura-actual.md) · [Dependencias](docs/dependencias-terceros.md).
 
 ```sh
 npm run check
 npm run evaluate:review
+npm run evaluate:operations
 ```
 
-`check` ejecuta TypeScript, formato y pruebas unitarias, de persistencia y HTTP. `test-local.cmd` ejecuta el mismo chequeo en Windows. `evaluate:review` usa Ollama y casos sintéticos, separados de las pruebas con dobles. Los informes de evaluación distinguen las respuestas del modelo y las rutas por reglas.
+`check` revisa tipos y formato y ejecuta las pruebas automatizadas. Las evaluaciones de IA requieren Ollama y guardan sus resultados para casos sintéticos en `data/evaluations/`.
 
-## Docker y datos
+## Docker, copias y límites
 
 ```sh
-docker build --target verification -t changelab:verification .
 docker compose up --build -d --wait
-docker compose ps
-docker compose stop
+docker compose exec app npm run users:create
 ```
 
-La imagen de verificación ejecuta `npm run check`. Compose publica el puerto 4320 en loopback y usa un volumen propio. El contenedor de ejecución usa un usuario sin privilegios y raíz de solo lectura. Para acceder a Ollama desde el contenedor usa `host.docker.internal:11434`. [Guía Docker](docs/docker-local.md) · [Arranque de Compose](https://docs.docker.com/compose/how-tos/startup-order/).
+Con Docker, abre [Gestión](http://127.0.0.1:4320/gestion) o [Tienda](http://127.0.0.1:4320/tienda). Compose usa un volumen propio para SQLite y conecta con Ollama en `host.docker.internal:11434` por defecto. Ejecuta `docker compose stop` cuando termines. [Guía Docker](docs/docker-local.md).
 
-`npm run db:backup` crea una copia SQLite verificada. `npm run db:restore -- <copia> <destino-nuevo>` permite comprobar la recuperación en una ubicación nueva. [Copias y recuperación](docs/copias-locales.md).
+Para la instalación sin Docker, `npm run db:backup` crea una copia verificada. `npm run db:restore -- <carpeta-de-copia> <destino-nuevo>` permite comprobar la restauración en otra ubicación. [Copias y recuperación](docs/copias-locales.md).
 
-## Límites operativos
-
-El catálogo inicial contiene datos ficticios. Los pagos se simulan y los documentos fiscales carecen de validez. El abono de proveedor se registra como documento y el margen se calcula por artículo. Los PDF escaneados requieren texto obtenido mediante OCR externo.
-
-[Dependencias de terceros](docs/dependencias-terceros.md).
+La instalación está pensada para uso local. El catálogo inicial es ficticio, los pagos son simulados y los documentos fiscales son de prueba. El correo queda en vista previa con la configuración predeterminada. Los PDF escaneados requieren OCR externo. [Correos y envíos](docs/correos-envios.md).
