@@ -73,6 +73,17 @@ npm run evaluate:operations
 
 `check` revisa tipos y formato y ejecuta las pruebas automatizadas. Las evaluaciones de IA requieren Ollama y guardan sus resultados para casos sintéticos en `data/evaluations/`.
 
+Para repetir el recorrido de la tarifa en un navegador:
+
+```sh
+npx playwright install chromium
+npm run test:e2e
+```
+
+Esta prueba arranca una instancia con datos en memoria y cuentas temporales. Comprueba la importación del PDF, la simulación, la aprobación por Dirección y el acceso de Almacén. Los resultados del navegador se guardan fuera de los archivos versionados.
+
+Los evaluadores de IA guardan el informe aunque falle una comprobación y devuelven un código de error si algún criterio no se cumple. La revisión usa 16 escenarios repetidos dos veces y operaciones usa seis escenarios, con controles por reglas y llamadas al modelo.
+
 ## Docker, copias y límites
 
 ```sh

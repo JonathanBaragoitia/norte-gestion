@@ -220,7 +220,7 @@ cases.push({
     );
   },
 });
-const results: unknown[] = [];
+const results: ({ criterionPassed: boolean } & Record<string, unknown>)[] = [];
 for (let repetition = 1; repetition <= 2; repetition++)
   for (const c of cases) {
     const start = Date.now();
@@ -268,3 +268,6 @@ await mkdir('data/evaluations', { recursive: true });
 const path = 'data/evaluations/review-' + report.at.replaceAll(':', '-') + '.json';
 await writeFile(path, JSON.stringify(report, null, 2) + '\n');
 console.log('REPORT ' + path);
+const passed = results.filter((result) => result.criterionPassed).length;
+console.log(passed + '/' + results.length + ' criterios superados');
+if (passed !== results.length) process.exitCode = 1;

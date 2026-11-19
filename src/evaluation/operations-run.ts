@@ -8,7 +8,7 @@ import {
 } from '../application/shopping-assistance.ts';
 import { validateExtracted } from '../application/document-imports.ts';
 const ai = new LocalCommercialAI(),
-  results: unknown[] = [];
+  results: ({ criterionPassed: boolean } & Record<string, unknown>)[] = [];
 async function run(
   name: string,
   operation: () => Promise<unknown>,
@@ -144,3 +144,6 @@ await mkdir('data/evaluations', { recursive: true });
 const path = 'data/evaluations/operations-' + report.at.replaceAll(':', '-') + '.json';
 await writeFile(path, JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify({ path, results }));
+const passed = results.filter((result) => result.criterionPassed).length;
+console.log(passed + '/' + results.length + ' criterios superados');
+if (passed !== results.length) process.exitCode = 1;
